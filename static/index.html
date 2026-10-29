@@ -5,6 +5,7 @@
 <header>
 <h1>Derby Timer</h1>
 <nav id="nav"></nav>
+<button class="btn s" id="clsbtn" onclick="openClasses()">Class: none</button>
 <div class="ser"><span class="dot" id="dot"></span><span id="st" class="hl"></span>
 <input id="port" value="COM18" size="7" aria-label="Port"><input id="baud" value="9600" size="5" aria-label="Baud">
 <button class="btn" id="conn">Connect</button><button class="btn" onclick="go('simulate')">Simulate race</button></div>
@@ -55,7 +56,7 @@ $('#track').innerHTML=L.map(l=>`<div class="lane" id="l${l}" style="--c:var(--c$
 $('#conn').onclick=()=>go('connect',{port:$('#port').value,baud:$('#baud').value});
 function renderRace(){
  const run=S.state!='setup',show=Object.keys(S.res).length>0,view=run||show;
- $('#msg').textContent=S.msg;$('#st').textContent=S.status;$('#dot').classList.toggle('ok',S.connected);$('#conn').textContent=S.connected?'Disconnect':'Connect';
+ $('#msg').textContent=S.msg;$('#clsbtn').textContent='Class: '+(S.cls||'none selected');$('#clsbtn').classList.toggle('p',!S.cls);$('#st').textContent=S.status;$('#dot').classList.toggle('ok',S.connected);$('#conn').textContent=S.connected?'Disconnect':'Connect';
  for(const l of L){
   const e=$('#l'+l),cid=view?S.cur[l]:sel[l],c=D.cont.find(x=>x.id==cid),sl=e.querySelector('select'),cr=e.querySelector('.car'),waiting=!!(run&&!(l in S.res)&&c&&S.state=='armed');e.querySelector('.road').classList.toggle('run',waiting);
   const o='<option value="">(empty)</option>'+D.cont.filter(x=>x.active&&!L.some(k=>k!=l&&sel[k]==x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
@@ -68,7 +69,7 @@ function renderRace(){
  }
  document.querySelectorAll('[data-s]').forEach(b=>b.hidden=!b.dataset.s.split(' ').includes(S.state));
 }
-async function tick(force){const s=await(await fetch('/api/state')).json(),n=JSON.stringify(s);if(n!=sig||force){const was=S.state;sig=n;S=s;renderRace();if(was!=s.state)loadData()}}
+async function tick(force){const s=await(await fetch('/api/state')).json(),n=JSON.stringify(s);if(n!=sig||force){const was=S.state;sig=n;S=s;renderRace();if(!S.cls&&!asked){asked=1;openClasses()}if(was!=s.state)loadData()}}
 async function loadData(){D=await(await fetch('/api/data')).json();renderRace();renderSched();renderComp();renderHeats();renderStand()}
 function loadNext(){const p=D.planned.find(h=>h.status=='pending');if(!p)return alert('No scheduled heats are waiting. Generate a schedule first.');loadPlanned(p.id)}
 async function loadPlanned(id){const h=D.planned.find(x=>x.id==id);await api('clearres');for(const l of L)sel[l]=h.layout[l]??'';planned=id;show('race');S.msg='';renderRace();$('#msg').textContent=`Scheduled heat ${h.seq} loaded. Press Start heat.`}
@@ -98,6 +99,22 @@ function renderStand(){
  $('#sbody').innerHTML=rk.map((r,i)=>{const k=key(r).join();if(k!=p){n=i+1;p=k}return tr(med[n-1]||n,r)}).join('')+un.map(r=>tr('-',r)).join('');
  const mx=Math.max(1,...D.laneAvg.map(x=>x.avg)),mn=Math.min(...D.laneAvg.map(x=>x.avg));
  $('#lavg').innerHTML=D.laneAvg.length?D.laneAvg.map(x=>`<div class="lb"><b style="width:60px;color:var(--c${x.lane})">Lane ${x.lane}</b><span style="--c:var(--c${x.lane});width:${Math.round(x.avg/mx*60)}%"></span>${fmt(Math.round(x.avg))}</div>`).join('')+'<div class="hl">Big gaps between lanes suggest a track bias.</div>':'<span class="hl">No finished races yet.</span>'}
+let asked=0;
+async function openClasses(){
+ const list=await(await fetch('/api/classes')).json();
+ $('#mbody').innerHTML=`<div class="bar" style="margin:0"><h2 style="margin:0">Class profiles</h2>${S.cls?'<button class="btn s" style="margin-left:auto" onclick="$(\'#modal\').hidden=true">Close</button>':''}</div>
+ <p class="hl">Each class is one file in the <b>classes</b> folder next to server.py. Download or copy a file to share it, and import it on another computer.</p>
+ <table><tbody>${list.length?list.map(c=>`<tr><td><b>${esc(c.name)}</b>${c.name==S.cls?' <span class="chip running">open</span>':''}<br><span class="hl">${c.contenders} contenders · ${c.races} races</span>
+ <td style="text-align:right;white-space:nowrap">${c.name==S.cls?'':`<button class="btn s p" data-n="${esc(c.name)}" onclick="clsOpen(this.dataset.n)">Open</button> `}<a class="btn s" href="/api/classfile/${encodeURIComponent(c.name)}" download>Download</a>${c.name==S.cls?'':` <button class="btn s d" data-n="${esc(c.name)}" onclick="clsDel(this.dataset.n)">Delete</button>`}`).join(''):'<tr><td class="hl">No classes yet. Create one below.'}</tbody></table>
+ <div class="bar"><input id="newcls" placeholder="New class name" onkeydown="if(event.key==='Enter')clsNew()"><button class="btn p" onclick="clsNew()">Create class</button></div>
+ <div class="bar"><input type="file" id="impf" accept=".derby,.db"><button class="btn" onclick="clsImp()">Import file</button></div>`;
+ $('#modal').hidden=false}
+function switched(r){if(r.error)return;for(const l of L)sel[l]='';planned=null;$('#modal').hidden=true;show('race')}
+async function clsOpen(n){switched(await api('classOpen',{name:n}))}
+async function clsNew(){const n=$('#newcls').value.trim();if(n)switched(await api('classNew',{name:n}))}
+async function clsDel(n){if(confirm(`Delete class "${n}" and all its data? This cannot be undone.`)){await api('classDelete',{name:n});openClasses()}}
+async function clsImp(){const f=$('#impf').files[0];if(!f)return alert('Choose a file first');const fd=new FormData();fd.append('file',f);
+ const r=await(await fetch('/api/classImport',{method:'POST',body:fd})).json();if(r.error)alert(r.error);else openClasses()}
 document.addEventListener('keydown',e=>{if(e.key=='Escape')$('#modal').hidden=true});
 async function profile(id){
  const c=D.cont.find(x=>x.id==id),h=await(await fetch('/api/history/'+id)).json();
