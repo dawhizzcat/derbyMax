@@ -1,6 +1,8 @@
 # DerbyMax
 ### Open source modernized derby timer software
 
+Download the latest stable release from the releases page, unzip and ensure all included files stay within a directory.
+
 Start the program by running the server.py file within the derbyMax file.
 Close the program by closing the linked webpage.
 
