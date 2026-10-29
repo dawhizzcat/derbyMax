@@ -1,0 +1,75 @@
+/* Direction: pit-wall timing board. Warm charcoal, ember (orange to red) for chrome and focus,
+   lane colors reserved for lanes and cars. Square corners, slanted buttons, no shadows. */
+:root{color-scheme:dark;
+--bg:#0f0c0b;--panel:#181311;--raise:#241c19;--line:#3a2e29;--ink:#f1e8e1;--mute:#a09287;
+--hot:#ff7a1a;--hot2:#e5322d;--ember:linear-gradient(90deg,#ff8a1f,#e5322d);
+--c1:#ff4d6d;--c2:#3aa0ff;--c3:#36d399;--c4:#ffc933;
+--ui:"Bahnschrift","DIN Alternate","Arial Narrow",system-ui,sans-serif;--num:"Cascadia Mono",Consolas,"SF Mono",monospace}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--ink);font:15px/1.45 var(--ui)}
+:focus-visible{outline:2px solid var(--hot);outline-offset:2px}
+header{display:flex;flex-wrap:wrap;gap:12px 22px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--panel)}
+h1{margin:0;font-size:22px;font-weight:800;font-style:italic;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+h1:before{content:"";width:9px;height:24px;background:var(--ember);transform:skewX(-18deg)}
+nav{display:flex;gap:2px;overflow-x:auto}
+nav button{border:0;background:none;color:var(--mute);font:inherit;font-weight:700;padding:10px 16px;cursor:pointer}
+nav button:hover{color:var(--ink)}
+nav button.on{color:var(--ink);background:var(--ember) bottom/100% 3px no-repeat}
+.ser{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dot{width:10px;height:10px;background:#5a4d45;transform:skewX(-18deg)}.dot.ok{background:var(--c3)}
+input,select{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:0;background:var(--bg);color:var(--ink);min-width:0}
+input:focus,select:focus{border-color:var(--hot);outline:none;box-shadow:0 2px 0 var(--hot)}
+.btn{border:0;font:inherit;font-weight:700;padding:9px 22px;color:var(--ink);background:var(--raise);cursor:pointer;
+ clip-path:polygon(9px 0,100% 0,calc(100% - 9px) 100%,0 100%)}
+.btn:hover{background:#3a2c25;color:var(--hot)}
+.btn.p{background:var(--ember);color:#1a0d07}.btn.p:hover{filter:brightness(1.12);color:#1a0d07}
+.btn.d{color:#ff7a6e}.btn.s{padding:5px 16px;font-size:13px;clip-path:polygon(6px 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+[hidden]{display:none!important}
+main{padding:18px 24px 40px;max-width:1120px;margin:auto}
+.card{background:var(--panel);border:1px solid var(--line);padding:16px;margin-bottom:14px}
+.msg{font-weight:700;margin:0 0 14px;padding:9px 14px;background:var(--panel);border-left:4px solid var(--hot);min-height:42px}
+.track{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.lane{background:var(--panel);border-top:4px solid var(--c);padding:10px 12px 12px;
+ clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,0 100%)}
+.lane h3{margin:0 0 8px;color:var(--c);font-size:20px;font-weight:800;font-style:italic}
+.lane select{width:100%}.nm{font-weight:700;min-height:24px;font-size:17px}
+.road{position:relative;height:340px;margin:8px 0 10px;background:repeating-linear-gradient(#17120f 0 28px,#1c1613 28px 56px);
+ border-left:3px solid color-mix(in srgb,var(--c) 75%,#000);border-right:3px solid color-mix(in srgb,var(--c) 75%,#000);overflow:hidden}
+.road:before{content:"";position:absolute;left:0;right:0;top:0;height:24px;background:repeating-conic-gradient(var(--ink) 0 25%,#171110 0 50%) 0 0/24px 24px}
+.road i{position:absolute;left:50%;top:24px;bottom:0;border-left:3px dashed color-mix(in srgb,var(--c) 40%,transparent)}
+.car{position:absolute;left:50%;width:62px;margin-left:-31px;top:calc(100% - 100px);transition:top .8s cubic-bezier(.2,.9,.25,1)}
+.car.fin{top:36px}.car.empty{opacity:0}.car svg{display:block}
+/* Racing: road scrolls, speed streaks fly past, car bobs and drifts. Each lane has its own tempo. */
+#l1{--sp:.5s;--surge:2.6s;--amp:-95px}#l2{--sp:.62s;--surge:3.4s;--amp:-70px}
+#l3{--sp:.56s;--surge:3s;--amp:-85px}#l4{--sp:.7s;--surge:3.9s;--amp:-60px}
+.road.run{animation:scroll var(--sp) linear infinite}
+.road.run:after{content:"";position:absolute;inset:24px 0 0;pointer-events:none;
+ background:linear-gradient(transparent 50%,var(--sl)) 14% 0/2px 140px repeat-y,linear-gradient(transparent 50%,var(--sl)) 38% 0/2px 220px repeat-y,
+ linear-gradient(transparent 50%,var(--sl)) 66% 0/2px 100px repeat-y,linear-gradient(transparent 50%,var(--sl)) 88% 0/2px 180px repeat-y;
+ animation:streak calc(var(--sp)*2.5) linear infinite}
+.lane{--sl:color-mix(in srgb,var(--c) 45%,#fff)}
+.car.wait svg{animation:surge var(--surge) ease-in-out infinite alternate}
+@keyframes scroll{to{background-position-y:56px}}
+@keyframes streak{to{background-position:14% 140px,38% 220px,66% 100px,88% 180px}}
+@keyframes surge{0%{transform:translateY(0)}40%{transform:translateY(calc(var(--amp)*.9))}65%{transform:translateY(calc(var(--amp)*.35))}100%{transform:translateY(var(--amp))}}
+.time{font:800 30px/1.1 var(--num);font-variant-numeric:tabular-nums;display:inline-block;min-width:150px}
+.badge{display:inline-block;min-width:36px;padding:1px 10px;background:var(--c);color:#150d08;font-weight:800;font-style:italic;visibility:hidden;
+ clip-path:polygon(6px 0,100% 0,calc(100% - 6px) 100%,0 100%);text-align:center}.badge.v{visibility:visible}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.card.bar{border-color:#ff7a1a66;margin-top:14px}
+table{width:100%;border-collapse:collapse}th{text-align:left;color:var(--mute);font-size:13px;font-weight:600;padding:6px 8px}
+td{padding:9px 8px;border-top:1px solid var(--line)}tbody tr:hover{background:#ffffff08}
+.chip{padding:2px 9px;background:var(--raise);border-left:3px solid var(--mute);font-size:12px;font-weight:700}
+.chip.done{border-color:var(--c3);color:var(--c3)}.chip.running{border-color:var(--hot);color:var(--hot)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.cc{padding:13px 14px;background:var(--raise);border-left:3px solid var(--line);cursor:pointer}
+.cc:hover{border-left-color:var(--hot);background:#2d231f}.cc.off{opacity:.55}.cc b{font-size:18px}.cc small{color:var(--mute)}
+.lb{display:flex;align-items:center;gap:10px;margin:6px 0;font-family:var(--num)}.lb span{height:12px;background:var(--c)}
+.hl{font-size:13px;color:var(--mute)}
+#modal{position:fixed;inset:0;background:#000c;display:flex;align-items:center;justify-content:center;padding:16px;z-index:9}
+#modal .card{width:min(720px,100%);max-height:94vh;overflow:auto;margin:0;border-color:#ff7a1a99}
+#modal svg{width:100%;height:auto;display:block}.sv text{fill:var(--mute);font-size:11px;font-family:var(--num)}
+.stats{display:flex;gap:22px;flex-wrap:wrap;margin:8px 0 12px}.stats div{font-size:12px;color:var(--mute)}
+.stats b{display:block;font:800 22px var(--num);color:var(--ink)}
+@media(max-width:700px){.track{grid-template-columns:repeat(2,1fr)}header,main{padding-left:14px;padding-right:14px}.road{height:260px}}
+@media(prefers-reduced-motion:reduce){.car,.car.wait svg,.road.run,.road.run:after{transition:none;animation:none}}
