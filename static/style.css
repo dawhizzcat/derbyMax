@@ -73,3 +73,5 @@ td{padding:9px 8px;border-top:1px solid var(--line)}tbody tr:hover{background:#f
 .stats b{display:block;font:800 22px var(--num);color:var(--ink)}
 @media(max-width:700px){.track{grid-template-columns:repeat(2,1fr)}header,main{padding-left:14px;padding-right:14px}.road{height:260px}}
 @media(prefers-reduced-motion:reduce){.car,.car.wait svg,.road.run,.road.run:after{transition:none;animation:none}}
+a.btn{text-decoration:none;display:inline-block}
+#mbody input[type=file]{max-width:250px}
