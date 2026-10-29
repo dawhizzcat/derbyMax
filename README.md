@@ -1,5 +1,5 @@
 # DerbyMax
-derby timer software for engineering class
+open source modernized derby timer software for engineering class
 
 Start the program by running the server.py file within the derbyMax file.
 Close the program by closing the linked webpage.
@@ -16,3 +16,8 @@ Features:
   - Heat records.
   - Average lane speed tracker. 
   
+Future features:
+  - Online database class info saving options for easier replication across devices.
+  - Profile editing.
+  - Online server replication with join codes for larger events.
+  - Tournament generation bracket and progression + heat generation.
