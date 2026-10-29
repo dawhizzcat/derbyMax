@@ -162,6 +162,12 @@ def hist(cid):
     if db is None: return jsonify([])
     return jsonify([dict(heat=h, race=r, ts=ts, lane=l, ticks=t, place=p) for h, r, ts, l, t, p in db.history(cid)])
 
+@app.route("/api/ports")
+def ports():
+    from serial.tools import list_ports
+    nat = lambda p: [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", p.device)]   # COM2 before COM10
+    return jsonify([dict(device=p.device, desc=p.description) for p in sorted(list_ports.comports(), key=nat)])
+
 @app.route("/api/classes")
 def classes():
     out = []
