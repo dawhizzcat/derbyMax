@@ -19,7 +19,8 @@ Features:
   - Average lane speed tracker. 
   
 Future features:
-  - Online database class info saving options for easier replication across devices.
   - Profile editing.
-  - Online server replication with join codes for larger events.
+  - Race analysis stats at end of a heat. 
   - Tournament generation bracket and progression + heat generation.
+  - Online database class info saving options for easier replication across devices.
+  - Online server replication with join codes for larger events.
