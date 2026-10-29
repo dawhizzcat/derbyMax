@@ -1,143 +1,597 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Derby Timer</title>
-<link rel="stylesheet" href="style.css"></head><body>
-<header>
-<h1>Derby Timer</h1>
-<nav id="nav"></nav>
-<button class="btn s" id="clsbtn" onclick="openClasses()">Class: none</button>
-<div class="ser"><span class="dot" id="dot"></span><span id="st" class="hl"></span>
-<input id="port" value="COM18" size="7" aria-label="Port"><input id="baud" value="9600" size="5" aria-label="Baud">
-<button class="btn" id="conn">Connect</button><button class="btn" onclick="go('simulate')">Simulate race</button></div>
-</header>
-<main>
-<section id="p-race">
- <div class="msg" id="msg"></div>
- <div class="track" id="track"></div>
- <div class="card bar" style="margin-top:14px">
-  <span data-s="setup"><label>Races per heat <input id="total" type="number" min="1" max="8" value="4" style="width:60px"></label></span>
-  <button class="btn" data-s="setup" onclick="loadNext()">Load next scheduled</button>
-  <button class="btn" data-s="setup" onclick="randomHeat()">Random</button>
-  <button class="btn" data-s="setup" onclick="scramble()">Scramble lanes</button>
-  <button class="btn" data-s="setup" onclick="clearLanes()">Clear lanes</button>
-  <button class="btn p" data-s="setup" onclick="start()">Start heat</button>
-  <button class="btn" data-s="armed" onclick="if(confirm('Lanes with no time will be recorded as DNF. Record now?'))go('record')">Record now (DNF missing)</button>
-  <button class="btn p" data-s="between" onclick="go('next')">Next race</button>
-  <button class="btn d" data-s="armed between" onclick="if(confirm('End the heat now? Recorded races are kept.'))go('end')">End heat</button>
- </div>
-</section>
-<section id="p-sched" hidden><div class="card">
- <div class="bar" style="margin:0 0 8px"><button class="btn p" onclick="genSched()">Generate schedule</button>
- <button class="btn d" onclick="confirm('Remove every heat? Results are kept.')&&go('clearSched')">Clear schedule</button><span class="hl" id="schinfo"></span></div>
- <table><thead><tr><th>Slot<th>Status<th>Lane 1<th>Lane 2<th>Lane 3<th>Lane 4<th></thead><tbody id="schbody"></tbody></table></div></section>
-<section id="p-comp" hidden><div class="card"><div class="bar" style="margin:0 0 12px">
- <input id="newname" placeholder="Contender name" onkeydown="if(event.key=='Enter')addC()"><button class="btn p" onclick="addC()">Add contender</button></div>
- <div class="grid" id="cgrid"></div></div></section>
-<section id="p-heats" hidden><div id="hlist"></div></section>
-<section id="p-stand" hidden><div class="card">
- <div class="bar" style="margin:0 0 8px">Rank by <select id="rank" onchange="renderStand()"><option>Average time<option>Best time<option>Wins</select></div>
- <table><thead><tr><th>Rank<th>Name<th>Races<th>DNF<th>Wins<th>Average<th>Best</thead><tbody id="sbody"></tbody></table></div>
- <div class="card"><b>Average time by lane</b><div id="lavg"></div></div></section>
-</main>
-<div id="modal" hidden onclick="if(event.target==this)this.hidden=true"><div class="card" id="mbody"></div></div>
-<script>
-const $=s=>document.querySelector(s),L=[1,2,3,4];
-const api=async(a,d={})=>{const r=await(await fetch('/api/'+a,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)})).json();if(r.error)alert(r.error);await tick(true);await loadData();return r};
-const go=(a,d)=>api(a,d);
-const fmt=t=>t==null?'DNF':Math.floor(t/1e4)+'.'+String(t%1e4).padStart(4,'0');
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const car=c=>`<svg viewBox="0 0 60 96" width="62"><polygon points="30,2 47,28 55,86 5,86 13,28" fill="${c}"/><polygon points="22,38 38,38 42,54 18,54" fill="#0f0c0bcc"/><rect x="0" y="22" width="10" height="18" fill="#120d0b"/><rect x="50" y="22" width="10" height="18" fill="#120d0b"/><rect x="0" y="64" width="10" height="18" fill="#120d0b"/><rect x="50" y="64" width="10" height="18" fill="#120d0b"/></svg>`;
-let S={res:{},cur:{},places:{},state:'setup'},D={cont:[],planned:[],heats:[],laneAvg:[]},sel={1:'',2:'',3:'',4:''},planned=null,page='race',sig='';
-const pages={race:'Race',sched:'Schedule',comp:'Competitors',heats:'Heats',stand:'Standings'};
-$('#nav').innerHTML=Object.entries(pages).map(([k,v])=>`<button data-k="${k}" onclick="show('${k}')">${v}</button>`).join('');
-function show(k){page=k;for(const p in pages){$('#p-'+p).hidden=p!=k}document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.k==k));loadData()}
-$('#track').innerHTML=L.map(l=>`<div class="lane" id="l${l}" style="--c:var(--c${l})"><h3>Lane ${l}</h3><select onchange="sel[${l}]=this.value;planned=null;api('clearres')"></select><div class="nm"></div>
-<div class="road"><i></i><div class="car empty">${car(`var(--c${l})`)}</div></div><div class="time">--</div><span class="badge"></span></div>`).join('');
-$('#conn').onclick=()=>go('connect',{port:$('#port').value,baud:$('#baud').value});
-function renderRace(){
- const run=S.state!='setup',show=Object.keys(S.res).length>0,view=run||show;
- $('#msg').textContent=S.msg;$('#clsbtn').textContent='Class: '+(S.cls||'none selected');$('#clsbtn').classList.toggle('p',!S.cls);$('#st').textContent=S.status;$('#dot').classList.toggle('ok',S.connected);$('#conn').textContent=S.connected?'Disconnect':'Connect';
- for(const l of L){
-  const e=$('#l'+l),cid=view?S.cur[l]:sel[l],c=D.cont.find(x=>x.id==cid),sl=e.querySelector('select'),cr=e.querySelector('.car'),waiting=!!(run&&!(l in S.res)&&c&&S.state=='armed');e.querySelector('.road').classList.toggle('run',waiting);
-  const o='<option value="">(empty)</option>'+D.cont.filter(x=>x.active&&!L.some(k=>k!=l&&sel[k]==x.id)).map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('');
-  if(sl.dataset.o!=o){sl.innerHTML=o;sl.dataset.o=o}sl.value=sel[l];sl.hidden=view;
-  e.querySelector('.nm').textContent=view&&c?c.name:'';
-  const has=l in S.res,t=S.res[l];
-  cr.className='car'+(c?'':' empty')+(has&&t!=null?' fin':'')+(waiting?' wait':'');
-  e.querySelector('.time').textContent=has?fmt(t):(S.state=='armed'&&c?'...':'--');
-  const b=e.querySelector('.badge'),p=S.places[l];b.textContent='P'+p;b.classList.toggle('v',!!p);
- }
- document.querySelectorAll('[data-s]').forEach(b=>b.hidden=!b.dataset.s.split(' ').includes(S.state));
-}
-async function tick(force){const s=await(await fetch('/api/state')).json(),n=JSON.stringify(s);if(n!=sig||force){const was=S.state;sig=n;S=s;renderRace();if(!S.cls&&!asked){asked=1;openClasses()}if(was!=s.state)loadData()}}
-async function loadData(){D=await(await fetch('/api/data')).json();renderRace();renderSched();renderComp();renderHeats();renderStand()}
-function loadNext(){const p=D.planned.find(h=>h.status=='pending');if(!p)return alert('No scheduled heats are waiting. Generate a schedule first.');loadPlanned(p.id)}
-async function loadPlanned(id){const h=D.planned.find(x=>x.id==id);await api('clearres');for(const l of L)sel[l]=h.layout[l]??'';planned=id;show('race');S.msg='';renderRace();$('#msg').textContent=`Scheduled heat ${h.seq} loaded. Press Start heat.`}
-async function randomHeat(){await api('clearres');const a=D.cont.filter(x=>x.active).map(x=>x.id);if(!a.length)return alert('No contenders are marked as racing');planned=null;fill(a.sort(()=>Math.random()-.5).slice(0,4))}
-async function scramble(){await api('clearres');planned=null;fill(L.map(l=>sel[l]).filter(Boolean))}
-function fill(ids){const sp=[...L].sort(()=>Math.random()-.5);ids=ids.sort(()=>Math.random()-.5);for(const l of L)sel[l]='';ids.forEach((id,i)=>sel[sp[i]]=id);renderRace()}
-async function clearLanes(){await api('clearres');planned=null;for(const l of L)sel[l]='';renderRace()}
-function start(){go('start',{lanes:sel,total:$('#total').value,planned})}
-const genSched=()=>(!D.planned.some(h=>h.status=='pending')||confirm('Replace the heats still waiting?'))&&go('genSched');
-function renderSched(){
- const h=D.planned;$('#schinfo').textContent=h.length?`${h.filter(x=>x.status=='done').length} of ${h.length} heats done`:'No schedule yet. Generate one from the contenders marked as racing.';
- $('#schbody').innerHTML=h.map(x=>`<tr style="${x.status=='done'?'opacity:.55':''}"><td>${x.seq}<td><span class="chip ${x.status}">${x.status}</span>`+L.map(l=>`<td>${esc(D.cont.find(c=>c.id==x.layout[l])?.name??'-')}`).join('')+
- `<td>${x.status=='pending'?`<button class="btn s" onclick="loadPlanned(${x.id})">Load</button>`:`<button class="btn s" onclick="go('markPending',{id:${x.id}})">Mark pending</button>`}`).join('')}
-function renderComp(){
- $('#cgrid').innerHTML=D.cont.length?D.cont.map(c=>`<div class="cc ${c.active?'':'off'}" onclick="profile(${c.id})"><b>${esc(c.name)}</b><br><small>${c.races} races · ${c.wins} wins · best ${c.best?fmt(c.best):'--'}</small>
- <div class="bar" onclick="event.stopPropagation()"><button class="btn s" onclick="go('toggle',{id:${c.id},active:${c.active?0:1}})">${c.active?'Racing':'Sitting out'}</button><button class="btn s d" onclick="confirm('Delete ${esc(c.name)}?')&&go('delete',{id:${c.id}})">Delete</button></div></div>`).join(''):'<span class="hl">No contenders yet. Add the first one above.</span>'}
-async function addC(){const n=$('#newname').value.trim();if(!n)return;$('#newname').value='';await go('addContender',{name:n})}
-function renderHeats(){
- $('#hlist').innerHTML=D.heats.length?D.heats.map(h=>`<div class="card"><div class="bar" style="margin:0 0 6px"><b>Heat ${h.id}</b><span class="hl">${h.ts}</span><button class="btn s d" style="margin-left:auto" onclick="confirm('Delete heat ${h.id} and all its races?')&&go('deleteHeat',{id:${h.id}})">Delete heat</button></div>
- <table><thead><tr><th>Race`+L.map(l=>`<th style="color:var(--c${l})">Lane ${l}`).join('')+`</thead><tbody>`+h.races.map(r=>`<tr><td>${r.num}`+L.map(l=>{const x=r.lanes[l];return x?`<td>${esc(x.name||'?')}<br><span class="hl">${fmt(x.ticks)}${x.place?' · P'+x.place:''}</span>`:'<td>-'}).join('')).join('')+'</tbody></table></div>').join(''):'<div class="card hl">No races recorded yet.</div>'}
-function renderStand(){
- const m=$('#rank').value,rows=D.cont.filter(c=>c.races||c.active).map(c=>({...c,avg:c.fin?Math.round(c.total/c.fin):null}));
- const rk=rows.filter(r=>r.avg!=null),un=rows.filter(r=>r.avg==null),key=r=>m=='Best time'?[r.best]:m=='Wins'?[-r.wins,r.avg]:[r.avg];
- rk.sort((a,b)=>{const x=key(a),y=key(b);for(let i=0;i<x.length;i++)if(x[i]!=y[i])return x[i]-y[i];return a.name.localeCompare(b.name)});
- let p=null,n=0;const med=['🥇','🥈','🥉'];
- const tr=(rank,r)=>`<tr><td>${rank}<td><b>${esc(r.name)}</b><td>${r.races}<td>${r.races-r.fin}<td>${r.wins}<td>${r.avg==null?'--':fmt(r.avg)}<td>${r.best==null?'--':fmt(r.best)}`;
- $('#sbody').innerHTML=rk.map((r,i)=>{const k=key(r).join();if(k!=p){n=i+1;p=k}return tr(med[n-1]||n,r)}).join('')+un.map(r=>tr('-',r)).join('');
- const mx=Math.max(1,...D.laneAvg.map(x=>x.avg)),mn=Math.min(...D.laneAvg.map(x=>x.avg));
- $('#lavg').innerHTML=D.laneAvg.length?D.laneAvg.map(x=>`<div class="lb"><b style="width:60px;color:var(--c${x.lane})">Lane ${x.lane}</b><span style="--c:var(--c${x.lane});width:${Math.round(x.avg/mx*60)}%"></span>${fmt(Math.round(x.avg))}</div>`).join('')+'<div class="hl">Big gaps between lanes suggest a track bias.</div>':'<span class="hl">No finished races yet.</span>'}
-let asked=0;
-async function openClasses(){
- const list=await(await fetch('/api/classes')).json();
- $('#mbody').innerHTML=`<div class="bar" style="margin:0"><h2 style="margin:0">Class profiles</h2>${S.cls?'<button class="btn s" style="margin-left:auto" onclick="$(\'#modal\').hidden=true">Close</button>':''}</div>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>DerbyMax</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+
+    <!-- Top bar: tabs, class picker, timer connection -->
+    <header>
+      <h1>DerbyMax</h1>
+      <nav id="nav"></nav>
+      <button class="btn s" id="clsbtn" onclick="openClasses()">Class: none</button>
+      <div class="ser">
+        <span class="dot" id="dot"></span><span id="st" class="hl"></span>
+        <select id="port" aria-label="Serial port"></select
+        ><button class="btn s" id="refp" title="Rescan serial ports" aria-label="Rescan serial ports">&#x21bb;</button><input
+          id="baud"
+          value="9600"
+          size="5"
+          aria-label="Baud"
+        />
+        <button class="btn" id="conn">Connect</button
+        ><button class="btn" onclick="go('simulate')">Simulate race</button>
+      </div>
+    </header>
+    <main>
+
+      <!-- Race page -->
+      <section id="p-race">
+        <div class="msg" id="msg"></div>
+        <div class="track" id="track"></div>
+        <div class="card bar" style="margin-top: 14px">
+          <span data-s="setup"
+            ><label
+              >Races per heat
+              <input id="total" type="number" min="1" max="8" value="4" style="width: 60px" /></label
+          ></span>
+          <button class="btn" data-s="setup" onclick="loadNext()">Load next scheduled</button>
+          <button class="btn" data-s="setup" onclick="randomHeat()">Random</button>
+          <button class="btn" data-s="setup" onclick="scramble()">Scramble lanes</button>
+          <button class="btn" data-s="setup" onclick="clearLanes()">Clear lanes</button>
+          <button class="btn p" data-s="setup" onclick="start()">Start heat</button>
+          <button
+            class="btn"
+            data-s="armed"
+            onclick="if (confirm('Lanes with no time will be recorded as DNF. Record now?')) go('record');"
+          >
+            Record now (DNF missing)
+          </button>
+          <button class="btn p" data-s="between" onclick="go('next')">Next race</button>
+          <button
+            class="btn d"
+            data-s="armed between"
+            onclick="if (confirm('End the heat now? Recorded races are kept.')) go('end');"
+          >
+            End heat
+          </button>
+        </div>
+      </section>
+
+      <!-- Schedule page -->
+      <section id="p-sched" hidden>
+        <div class="card">
+          <div class="bar" style="margin: 0 0 8px">
+            <button class="btn p" onclick="genSched()">Generate schedule</button>
+            <button
+              class="btn d"
+              onclick="confirm('Remove every heat? Results are kept.') && go('clearSched')"
+            >
+              Clear schedule</button
+            ><span class="hl" id="schinfo"></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Slot</th>
+                <th>Status</th>
+                <th>Lane 1</th>
+                <th>Lane 2</th>
+                <th>Lane 3</th>
+                <th>Lane 4</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="schbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Competitors page -->
+      <section id="p-comp" hidden>
+        <div class="card">
+          <div class="bar" style="margin: 0 0 12px">
+            <input
+              id="newname"
+              placeholder="Contender name"
+              onkeydown="if (event.key == 'Enter') addC();"
+            /><button class="btn p" onclick="addC()">Add contender</button>
+          </div>
+          <div class="grid" id="cgrid"></div>
+        </div>
+      </section>
+
+      <!-- Heats page -->
+      <section id="p-heats" hidden><div id="hlist"></div></section>
+
+      <!-- Standings page -->
+      <section id="p-stand" hidden>
+        <div class="card">
+          <div class="bar" style="margin: 0 0 8px">
+            Rank by
+            <select id="rank" onchange="renderStand()">
+              <option>Average time</option>
+              <option>Best time</option>
+              <option>Wins</option>
+            </select>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Name</th>
+                <th>Races</th>
+                <th>DNF</th>
+                <th>Wins</th>
+                <th>Average</th>
+                <th>Best</th>
+              </tr>
+            </thead>
+            <tbody id="sbody"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <b>Average time by lane</b>
+          <div id="lavg"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Popup shared by the competitor profile and the class picker -->
+    <div id="modal" hidden onclick="if (event.target == this) this.hidden = true;">
+      <div class="card" id="mbody"></div>
+    </div>
+    <script>
+
+      // ---- Helpers ----
+      const $ = (s) => document.querySelector(s),
+        L = [1, 2, 3, 4];
+      const api = async (a, d = {}) => {
+        const r = await (
+          await fetch('/api/' + a, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(d),
+          })
+        ).json();
+        if (r.error) alert(r.error);
+        await tick(true);
+        await loadData();
+        return r;
+      };
+      const go = (a, d) => api(a, d);
+      const fmt = (t) => (t == null ? 'DNF' : Math.floor(t / 1e4) + '.' + String(t % 1e4).padStart(4, '0'));
+      const esc = (s) =>
+        String(s ?? '').replace(
+          /[&<>"]/g,
+          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c],
+        );
+      const car = (c) =>
+        `<svg viewBox="0 0 60 96" width="62"><polygon points="30,2 47,28 55,86 5,86 13,28" fill="${c}"/><polygon points="22,38 38,38 42,54 18,54" fill="#0f0c0bcc"/><rect x="0" y="22" width="10" height="18" fill="#120d0b"/><rect x="50" y="22" width="10" height="18" fill="#120d0b"/><rect x="0" y="64" width="10" height="18" fill="#120d0b"/><rect x="50" y="64" width="10" height="18" fill="#120d0b"/></svg>`;
+
+      // ---- Shared state: S = live race state from the server, D = saved data ----
+      let S = { res: {}, cur: {}, places: {}, state: 'setup' },
+        D = { cont: [], planned: [], heats: [], laneAvg: [] },
+        sel = { 1: '', 2: '', 3: '', 4: '' },
+        planned = null,
+        page = 'race',
+        sig = '';
+
+      // ---- Page tabs ----
+      const pages = {
+        race: 'Race',
+        sched: 'Schedule',
+        comp: 'Competitors',
+        heats: 'Heats',
+        stand: 'Standings',
+      };
+      $('#nav').innerHTML = Object.entries(pages)
+        .map(([k, v]) => `<button data-k="${k}" onclick="show('${k}')">${v}</button>`)
+        .join('');
+      function show(k) {
+        page = k;
+        for (const p in pages) {
+          $('#p-' + p).hidden = p != k;
+        }
+        document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.k == k));
+        loadData();
+      }
+      $('#track').innerHTML = L.map(
+        (
+          l,
+        ) => `<div class="lane" id="l${l}" style="--c:var(--c${l})"><h3>Lane ${l}</h3><select onchange="sel[${l}]=this.value;planned=null;api('clearres')"></select><div class="nm"></div>
+<div class="road"><i></i><div class="car empty">${car(`var(--c${l})`)}</div></div><div class="time">--</div><span class="badge"></span></div>`,
+      ).join('');
+      $('#conn').onclick = () =>
+        S.connected || $('#port').value
+          ? go('connect', { port: $('#port').value, baud: $('#baud').value })
+          : alert('No serial port selected. Plug in the timer and press the rescan button.');
+
+      // ---- Serial port picker: lists the ports the computer can see ----
+      let portSig = '';
+      async function loadPorts() {
+        const sl = $('#port'),
+          keep = sl.value || 'COM18';
+        let list = [];
+        try {
+          list = await (await fetch('/api/ports')).json();
+        } catch (e) {}
+        const n = JSON.stringify(list);
+        if (n == portSig) return;
+        portSig = n;
+        sl.innerHTML = list.length
+          ? list
+              .map(
+                (p) =>
+                  `<option value="${esc(p.device)}">${esc(p.device)}${p.desc && p.desc != 'n/a' ? ' - ' + esc(p.desc) : ''}</option>`,
+              )
+              .join('')
+          : '<option value="">No ports found</option>';
+        if (list.some((p) => p.device == keep)) sl.value = keep;
+      }
+      $('#refp').onclick = () => {
+        portSig = '';
+        loadPorts();
+      };
+      // Pick up a timer that is plugged in later (skipped while connected or while the list is open)
+      setInterval(() => {
+        if (!S.connected && document.activeElement != $('#port')) loadPorts();
+      }, 3000);
+
+      // ---- Race page: draw lanes and cars from the current state ----
+      function renderRace() {
+        const run = S.state != 'setup',
+          show = Object.keys(S.res).length > 0,
+          view = run || show;
+        $('#msg').textContent = S.msg;
+        $('#clsbtn').textContent = 'Class: ' + (S.cls || 'none selected');
+        $('#clsbtn').classList.toggle('p', !S.cls);
+        $('#st').textContent = S.status;
+        $('#dot').classList.toggle('ok', S.connected);
+        $('#conn').textContent = S.connected ? 'Disconnect' : 'Connect';
+        $('#port').disabled = $('#refp').disabled = !!S.connected;
+        for (const l of L) {
+          const e = $('#l' + l),
+            cid = view ? S.cur[l] : sel[l],
+            c = D.cont.find((x) => x.id == cid),
+            sl = e.querySelector('select'),
+            cr = e.querySelector('.car'),
+            waiting = !!(run && !(l in S.res) && c && S.state == 'armed');
+          e.querySelector('.road').classList.toggle('run', waiting);
+          const o =
+            '<option value="">(empty)</option>' +
+            D.cont
+              .filter((x) => x.active && !L.some((k) => k != l && sel[k] == x.id))
+              .map((x) => `<option value="${x.id}">${esc(x.name)}</option>`)
+              .join('');
+          if (sl.dataset.o != o) {
+            sl.innerHTML = o;
+            sl.dataset.o = o;
+          }
+          sl.value = sel[l];
+          sl.hidden = view;
+          e.querySelector('.nm').textContent = view && c ? c.name : '';
+          const has = l in S.res,
+            t = S.res[l];
+          cr.className =
+            'car' + (c ? '' : ' empty') + (has && t != null ? ' fin' : '') + (waiting ? ' wait' : '');
+          e.querySelector('.time').textContent = has ? fmt(t) : S.state == 'armed' && c ? '...' : '--';
+          const b = e.querySelector('.badge'),
+            p = S.places[l];
+          b.textContent = 'P' + p;
+          b.classList.toggle('v', !!p);
+        }
+        document
+          .querySelectorAll('[data-s]')
+          .forEach((b) => (b.hidden = !b.dataset.s.split(' ').includes(S.state)));
+      }
+
+      // ---- Polling: ask the server for the race state every 300ms ----
+      async function tick(force) {
+        const s = await (await fetch('/api/state')).json(),
+          n = JSON.stringify(s);
+        if (n != sig || force) {
+          const was = S.state;
+          sig = n;
+          S = s;
+          renderRace();
+          if (!S.cls && !asked) {
+            asked = 1;
+            openClasses();
+          }
+          if (was != s.state) loadData();
+        }
+      }
+      async function loadData() {
+        D = await (await fetch('/api/data')).json();
+        renderRace();
+        renderSched();
+        renderComp();
+        renderHeats();
+        renderStand();
+      }
+
+      // ---- Race page: setting up and starting a heat ----
+      function loadNext() {
+        const p = D.planned.find((h) => h.status == 'pending');
+        if (!p) return alert('No scheduled heats are waiting. Generate a schedule first.');
+        loadPlanned(p.id);
+      }
+      async function loadPlanned(id) {
+        const h = D.planned.find((x) => x.id == id);
+        await api('clearres');
+        for (const l of L) sel[l] = h.layout[l] ?? '';
+        planned = id;
+        show('race');
+        S.msg = '';
+        renderRace();
+        $('#msg').textContent = `Scheduled heat ${h.seq} loaded. Press Start heat.`;
+      }
+      async function randomHeat() {
+        await api('clearres');
+        const a = D.cont.filter((x) => x.active).map((x) => x.id);
+        if (!a.length) return alert('No contenders are marked as racing');
+        planned = null;
+        fill(a.sort(() => Math.random() - 0.5).slice(0, 4));
+      }
+      async function scramble() {
+        await api('clearres');
+        planned = null;
+        fill(L.map((l) => sel[l]).filter(Boolean));
+      }
+      function fill(ids) {
+        const sp = [...L].sort(() => Math.random() - 0.5);
+        ids = ids.sort(() => Math.random() - 0.5);
+        for (const l of L) sel[l] = '';
+        ids.forEach((id, i) => (sel[sp[i]] = id));
+        renderRace();
+      }
+      async function clearLanes() {
+        await api('clearres');
+        planned = null;
+        for (const l of L) sel[l] = '';
+        renderRace();
+      }
+      function start() {
+        go('start', { lanes: sel, total: $('#total').value, planned });
+      }
+      const genSched = () =>
+        (!D.planned.some((h) => h.status == 'pending') || confirm('Replace the heats still waiting?')) &&
+        go('genSched');
+
+      // ---- Schedule, Competitors, Heats and Standings pages ----
+      function renderSched() {
+        const h = D.planned;
+        $('#schinfo').textContent = h.length
+          ? `${h.filter((x) => x.status == 'done').length} of ${h.length} heats done`
+          : 'No schedule yet. Generate one from the contenders marked as racing.';
+        $('#schbody').innerHTML = h
+          .map(
+            (x) =>
+              `<tr style="${x.status == 'done' ? 'opacity:.55' : ''}"><td>${x.seq}<td><span class="chip ${x.status}">${x.status}</span>` +
+              L.map((l) => `<td>${esc(D.cont.find((c) => c.id == x.layout[l])?.name ?? '-')}`).join('') +
+              `<td>${x.status == 'pending' ? `<button class="btn s" onclick="loadPlanned(${x.id})">Load</button>` : `<button class="btn s" onclick="go('markPending',{id:${x.id}})">Mark pending</button>`}`,
+          )
+          .join('');
+      }
+      function renderComp() {
+        $('#cgrid').innerHTML = D.cont.length
+          ? D.cont
+              .map(
+                (
+                  c,
+                ) => `<div class="cc ${c.active ? '' : 'off'}" onclick="profile(${c.id})"><b>${esc(c.name)}</b><br><small>${c.races} races · ${c.wins} wins · best ${c.best ? fmt(c.best) : '--'}</small>
+ <div class="bar" onclick="event.stopPropagation()"><button class="btn s" onclick="go('toggle',{id:${c.id},active:${c.active ? 0 : 1}})">${c.active ? 'Racing' : 'Sitting out'}</button><button class="btn s d" onclick="confirm('Delete ${esc(c.name)}?')&&go('delete',{id:${c.id}})">Delete</button></div></div>`,
+              )
+              .join('')
+          : '<span class="hl">No contenders yet. Add the first one above.</span>';
+      }
+      async function addC() {
+        const n = $('#newname').value.trim();
+        if (!n) return;
+        $('#newname').value = '';
+        await go('addContender', { name: n });
+      }
+      function renderHeats() {
+        $('#hlist').innerHTML = D.heats.length
+          ? D.heats
+              .map(
+                (h) =>
+                  `<div class="card"><div class="bar" style="margin:0 0 6px"><b>Heat ${h.id}</b><span class="hl">${h.ts}</span><button class="btn s d" style="margin-left:auto" onclick="confirm('Delete heat ${h.id} and all its races?')&&go('deleteHeat',{id:${h.id}})">Delete heat</button></div>
+ <table><thead><tr><th>Race` +
+                  L.map((l) => `<th style="color:var(--c${l})">Lane ${l}`).join('') +
+                  `</thead><tbody>` +
+                  h.races
+                    .map(
+                      (r) =>
+                        `<tr><td>${r.num}` +
+                        L.map((l) => {
+                          const x = r.lanes[l];
+                          return x
+                            ? `<td>${esc(x.name || '?')}<br><span class="hl">${fmt(x.ticks)}${x.place ? ' · P' + x.place : ''}</span>`
+                            : '<td>-';
+                        }).join(''),
+                    )
+                    .join('') +
+                  '</tbody></table></div>',
+              )
+              .join('')
+          : '<div class="card hl">No races recorded yet.</div>';
+      }
+      function renderStand() {
+        const m = $('#rank').value,
+          rows = D.cont
+            .filter((c) => c.races || c.active)
+            .map((c) => ({ ...c, avg: c.fin ? Math.round(c.total / c.fin) : null }));
+        const rk = rows.filter((r) => r.avg != null),
+          un = rows.filter((r) => r.avg == null),
+          key = (r) => (m == 'Best time' ? [r.best] : m == 'Wins' ? [-r.wins, r.avg] : [r.avg]);
+        rk.sort((a, b) => {
+          const x = key(a),
+            y = key(b);
+          for (let i = 0; i < x.length; i++) if (x[i] != y[i]) return x[i] - y[i];
+          return a.name.localeCompare(b.name);
+        });
+        let p = null,
+          n = 0;
+        const med = ['🥇', '🥈', '🥉'];
+        const tr = (rank, r) =>
+          `<tr><td>${rank}<td><b>${esc(r.name)}</b><td>${r.races}<td>${r.races - r.fin}<td>${r.wins}<td>${r.avg == null ? '--' : fmt(r.avg)}<td>${r.best == null ? '--' : fmt(r.best)}`;
+        $('#sbody').innerHTML =
+          rk
+            .map((r, i) => {
+              const k = key(r).join();
+              if (k != p) {
+                n = i + 1;
+                p = k;
+              }
+              return tr(med[n - 1] || n, r);
+            })
+            .join('') + un.map((r) => tr('-', r)).join('');
+        const mx = Math.max(1, ...D.laneAvg.map((x) => x.avg)),
+          mn = Math.min(...D.laneAvg.map((x) => x.avg));
+        $('#lavg').innerHTML = D.laneAvg.length
+          ? D.laneAvg
+              .map(
+                (x) =>
+                  `<div class="lb"><b style="width:60px;color:var(--c${x.lane})">Lane ${x.lane}</b><span style="--c:var(--c${x.lane});width:${Math.round((x.avg / mx) * 60)}%"></span>${fmt(Math.round(x.avg))}</div>`,
+              )
+              .join('') + '<div class="hl">Big gaps between lanes suggest a track bias.</div>'
+          : '<span class="hl">No finished races yet.</span>';
+      }
+
+      // ---- Class profiles popup ----
+      let asked = 0;
+      async function openClasses() {
+        const list = await (await fetch('/api/classes')).json();
+        $('#mbody').innerHTML =
+          `<div class="bar" style="margin:0"><h2 style="margin:0">Class profiles</h2>${S.cls ? '<button class="btn s" style="margin-left:auto" onclick="$(\'#modal\').hidden=true">Close</button>' : ''}</div>
  <p class="hl">Each class is one file in the <b>classes</b> folder next to server.py. Download or copy a file to share it, and import it on another computer.</p>
- <table><tbody>${list.length?list.map(c=>`<tr><td><b>${esc(c.name)}</b>${c.name==S.cls?' <span class="chip running">open</span>':''}<br><span class="hl">${c.contenders} contenders · ${c.races} races</span>
- <td style="text-align:right;white-space:nowrap">${c.name==S.cls?'':`<button class="btn s p" data-n="${esc(c.name)}" onclick="clsOpen(this.dataset.n)">Open</button> `}<a class="btn s" href="/api/classfile/${encodeURIComponent(c.name)}" download>Download</a>${c.name==S.cls?'':` <button class="btn s d" data-n="${esc(c.name)}" onclick="clsDel(this.dataset.n)">Delete</button>`}`).join(''):'<tr><td class="hl">No classes yet. Create one below.'}</tbody></table>
+ <table><tbody>${
+   list.length
+     ? list
+         .map(
+           (
+             c,
+           ) => `<tr><td><b>${esc(c.name)}</b>${c.name == S.cls ? ' <span class="chip running">open</span>' : ''}<br><span class="hl">${c.contenders} contenders · ${c.races} races</span>
+ <td style="text-align:right;white-space:nowrap">${c.name == S.cls ? '' : `<button class="btn s p" data-n="${esc(c.name)}" onclick="clsOpen(this.dataset.n)">Open</button> `}<a class="btn s" href="/api/classfile/${encodeURIComponent(c.name)}" download>Download</a>${c.name == S.cls ? '' : ` <button class="btn s d" data-n="${esc(c.name)}" onclick="clsDel(this.dataset.n)">Delete</button>`}`,
+         )
+         .join('')
+     : '<tr><td class="hl">No classes yet. Create one below.'
+ }</tbody></table>
  <div class="bar"><input id="newcls" placeholder="New class name" onkeydown="if(event.key==='Enter')clsNew()"><button class="btn p" onclick="clsNew()">Create class</button></div>
  <div class="bar"><input type="file" id="impf" accept=".derby,.db"><button class="btn" onclick="clsImp()">Import file</button></div>`;
- $('#modal').hidden=false}
-function switched(r){if(r.error)return;for(const l of L)sel[l]='';planned=null;$('#modal').hidden=true;show('race')}
-async function clsOpen(n){switched(await api('classOpen',{name:n}))}
-async function clsNew(){const n=$('#newcls').value.trim();if(n)switched(await api('classNew',{name:n}))}
-async function clsDel(n){if(confirm(`Delete class "${n}" and all its data? This cannot be undone.`)){await api('classDelete',{name:n});openClasses()}}
-async function clsImp(){const f=$('#impf').files[0];if(!f)return alert('Choose a file first');const fd=new FormData();fd.append('file',f);
- const r=await(await fetch('/api/classImport',{method:'POST',body:fd})).json();if(r.error)alert(r.error);else openClasses()}
-document.addEventListener('keydown',e=>{if(e.key=='Escape')$('#modal').hidden=true});
-async function profile(id){
- const c=D.cont.find(x=>x.id==id),h=await(await fetch('/api/history/'+id)).json();
- const pts=h.filter(r=>r.ticks!=null).map((r,i)=>({...r,i,s:r.ticks/1e4})),n=pts.length,wins=h.filter(r=>r.place==1).length;
- let g='<div class="hl">Finish a race to see this contender\'s graph.</div>',note='';
- if(n){
-  const W=640,H=300,m={l:50,r:18,t:18,b:34},ys=pts.map(p=>p.s),lo=Math.min(...ys),hi=Math.max(...ys),pad=(hi-lo||1)*.2,a=lo-pad,b=hi+pad;
-  const X=i=>m.l+(n==1?(W-m.l-m.r)/2:i/(n-1)*(W-m.l-m.r)),Y=v=>m.t+(b-v)/(b-a)*(H-m.t-m.b),col=l=>`var(--c${l})`;
-  g=`<svg class="sv" viewBox="0 0 ${W} ${H}" role="img" aria-label="Race times over time">`;
-  for(let k=0;k<=4;k++){const v=a+(b-a)*k/4;g+=`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${m.l-8}" y="${Y(v)+4}" text-anchor="end">${v.toFixed(2)}s</text>`}
-  const st=Math.ceil(n/12);pts.forEach(p=>{if(p.i%st==0)g+=`<text x="${X(p.i)}" y="${H-12}" text-anchor="middle">${p.i+1}</text>`});
-  g+=`<text x="${m.l}" y="10">slower ↑</text><text x="${W-m.r}" y="${H-1}" text-anchor="end">race number</text>`;
-  if(n>1){const mx=(n-1)/2,my=ys.reduce((u,v)=>u+v,0)/n,sl=pts.reduce((u,p)=>u+(p.i-mx)*(p.s-my),0)/pts.reduce((u,p)=>u+(p.i-mx)**2,0),ic=my-sl*mx;
-   g+=`<line x1="${X(0)}" y1="${Y(ic)}" x2="${X(n-1)}" y2="${Y(ic+sl*(n-1))}" stroke="#ffffff66" stroke-dasharray="6 5" stroke-width="2"/>`;
-   note=Math.abs(sl)<.005?'Times are holding steady.':sl<0?`Trend: about ${Math.abs(sl).toFixed(2)}s faster per race.`:`Trend: about ${sl.toFixed(2)}s slower per race.`}
-  g+=`<polyline fill="none" stroke="#ff8a3c" stroke-width="2.5" stroke-linejoin="round" points="${pts.map(p=>X(p.i)+','+Y(p.s)).join(' ')}"/>`;
-  for(const p of pts){const t=`<title>Heat ${p.heat}, race ${p.race}: ${fmt(p.ticks)} (lane ${p.lane}${p.place?', P'+p.place:''})</title>`;
-   g+=p.place==1?`<text x="${X(p.i)}" y="${Y(p.s)}" text-anchor="middle" dominant-baseline="central" style="font-size:24px;fill:#ffc933;stroke:#7a4a00;stroke-width:.6">★${t}</text>`:`<circle cx="${X(p.i)}" cy="${Y(p.s)}" r="6" fill="${col(p.lane)}" stroke="var(--card)" stroke-width="2">${t}</circle>`}
-  g+='</svg>'}
- const dn=h.length-n,best=n?fmt(Math.min(...pts.map(p=>p.ticks))):'--',avg=n?fmt(Math.round(pts.reduce((u,p)=>u+p.ticks,0)/n)):'--';
- $('#mbody').innerHTML=`<div class="bar" style="margin:0"><h2 style="margin:0">${esc(c.name)}</h2><button class="btn s" style="margin-left:auto" onclick="$('#modal').hidden=true">Close</button></div>
+        $('#modal').hidden = false;
+      }
+      function switched(r) {
+        if (r.error) return;
+        for (const l of L) sel[l] = '';
+        planned = null;
+        $('#modal').hidden = true;
+        show('race');
+      }
+      async function clsOpen(n) {
+        switched(await api('classOpen', { name: n }));
+      }
+      async function clsNew() {
+        const n = $('#newcls').value.trim();
+        if (n) switched(await api('classNew', { name: n }));
+      }
+      async function clsDel(n) {
+        if (confirm(`Delete class "${n}" and all its data? This cannot be undone.`)) {
+          await api('classDelete', { name: n });
+          openClasses();
+        }
+      }
+      async function clsImp() {
+        const f = $('#impf').files[0];
+        if (!f) return alert('Choose a file first');
+        const fd = new FormData();
+        fd.append('file', f);
+        const r = await (await fetch('/api/classImport', { method: 'POST', body: fd })).json();
+        if (r.error) alert(r.error);
+        else openClasses();
+      }
+      document.addEventListener('keydown', (e) => {
+        if (e.key == 'Escape') $('#modal').hidden = true;
+      });
+
+      // ---- Competitor profile popup with the results graph ----
+      async function profile(id) {
+        const c = D.cont.find((x) => x.id == id),
+          h = await (await fetch('/api/history/' + id)).json();
+        const pts = h.filter((r) => r.ticks != null).map((r, i) => ({ ...r, i, s: r.ticks / 1e4 })),
+          n = pts.length,
+          wins = h.filter((r) => r.place == 1).length;
+        let g = '<div class="hl">Finish a race to see this contender\'s graph.</div>',
+          note = '';
+        if (n) {
+          const W = 640,
+            H = 300,
+            m = { l: 50, r: 18, t: 18, b: 34 },
+            ys = pts.map((p) => p.s),
+            lo = Math.min(...ys),
+            hi = Math.max(...ys),
+            pad = (hi - lo || 1) * 0.2,
+            a = lo - pad,
+            b = hi + pad;
+          const X = (i) => m.l + (n == 1 ? (W - m.l - m.r) / 2 : (i / (n - 1)) * (W - m.l - m.r)),
+            Y = (v) => m.t + ((b - v) / (b - a)) * (H - m.t - m.b),
+            col = (l) => `var(--c${l})`;
+          g = `<svg class="sv" viewBox="0 0 ${W} ${H}" role="img" aria-label="Race times over time">`;
+          for (let k = 0; k <= 4; k++) {
+            const v = a + ((b - a) * k) / 4;
+            g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${m.l - 8}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(2)}s</text>`;
+          }
+          const st = Math.ceil(n / 12);
+          pts.forEach((p) => {
+            if (p.i % st == 0)
+              g += `<text x="${X(p.i)}" y="${H - 12}" text-anchor="middle">${p.i + 1}</text>`;
+          });
+          g += `<text x="${m.l}" y="10">slower ↑</text><text x="${W - m.r}" y="${H - 1}" text-anchor="end">race number</text>`;
+          if (n > 1) {
+            const mx = (n - 1) / 2,
+              my = ys.reduce((u, v) => u + v, 0) / n,
+              sl =
+                pts.reduce((u, p) => u + (p.i - mx) * (p.s - my), 0) /
+                pts.reduce((u, p) => u + (p.i - mx) ** 2, 0),
+              ic = my - sl * mx;
+            g += `<line x1="${X(0)}" y1="${Y(ic)}" x2="${X(n - 1)}" y2="${Y(ic + sl * (n - 1))}" stroke="#ffffff66" stroke-dasharray="6 5" stroke-width="2"/>`;
+            note =
+              Math.abs(sl) < 0.005
+                ? 'Times are holding steady.'
+                : sl < 0
+                  ? `Trend: about ${Math.abs(sl).toFixed(2)}s faster per race.`
+                  : `Trend: about ${sl.toFixed(2)}s slower per race.`;
+          }
+          g += `<polyline fill="none" stroke="#ff8a3c" stroke-width="2.5" stroke-linejoin="round" points="${pts.map((p) => X(p.i) + ',' + Y(p.s)).join(' ')}"/>`;
+          for (const p of pts) {
+            const t = `<title>Heat ${p.heat}, race ${p.race}: ${fmt(p.ticks)} (lane ${p.lane}${p.place ? ', P' + p.place : ''})</title>`;
+            g +=
+              p.place == 1
+                ? `<text x="${X(p.i)}" y="${Y(p.s)}" text-anchor="middle" dominant-baseline="central" style="font-size:24px;fill:${col(p.lane)};stroke:#150d08;stroke-width:.8">★${t}</text>`
+                : `<circle cx="${X(p.i)}" cy="${Y(p.s)}" r="6" fill="${col(p.lane)}" stroke="var(--card)" stroke-width="2">${t}</circle>`;
+          }
+          g += '</svg>';
+        }
+        const dn = h.length - n,
+          best = n ? fmt(Math.min(...pts.map((p) => p.ticks))) : '--',
+          avg = n ? fmt(Math.round(pts.reduce((u, p) => u + p.ticks, 0) / n)) : '--';
+        $('#mbody').innerHTML =
+          `<div class="bar" style="margin:0"><h2 style="margin:0">${esc(c.name)}</h2><button class="btn s" style="margin-left:auto" onclick="$('#modal').hidden=true">Close</button></div>
  <div class="stats"><div><b>${h.length}</b>races</div><div><b>${wins}</b>wins ★</div><div><b>${best}</b>best</div><div><b>${avg}</b>average</div><div><b>${dn}</b>DNF</div></div>${g}
- <div class="hl" style="margin-top:8px">${note} Dot colors match the lane raced; ★ marks a win. Lane differences can shift times, so check the lane averages on Standings.${dn?` ${dn} DNF not plotted.`:''}</div>`;
- $('#modal').hidden=false}
-show('race');tick(true);setInterval(tick,300);
-</script></body></html>
+ <div class="hl" style="margin-top:8px">${note} Dot colors match the lane raced; ★ marks a win. Lane differences can shift times, so check the lane averages on Standings.${dn ? ` ${dn} DNF not plotted.` : ''}</div>`;
+        $('#modal').hidden = false;
+      }
+
+      // ---- Start ----
+      show('race');
+      loadPorts();
+      tick(true);
+      setInterval(tick, 300);
+    </script>
+  </body>
+</html>
