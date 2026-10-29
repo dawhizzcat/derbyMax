@@ -1,5 +1,5 @@
 # DerbyMax
-## Open source modernized derby timer software for engineering class
+### Open source modernized derby timer software for engineering class
 
 Start the program by running the server.py file within the derbyMax file.
 Close the program by closing the linked webpage.
